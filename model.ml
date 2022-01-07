@@ -43,30 +43,30 @@ let print_grid string_of_cell grid =
 
 (* Funkcije za dostopanje do elementov mreže *)
 
-let get_row (grid : 'a grid) (row_ind : int) = grid.(row_ind)
+let get_row (grid : 'a grid) (row_ind : int) =
+  Array.copy grid.(row_ind)
 
-let rows grid = 
-  for i = 0 to 8 do
-    grid.(i) 
-  done
+let rows (grid : 'a grid) =
+  Array.init 9 (get_row grid)
 
 let get_column (grid : 'a grid) (col_ind : int) =
-  Array.init 9 (fun row_ind -> grid.(row_ind).(col_ind))
+  Array.copy (Array.init 9 (fun row_ind -> grid.(row_ind).(col_ind)))
 
-let columns grid = List.init 9 (get_column grid)
+let columns (grid : 'a grid) : 'a grid =
+  Array.init 9 (get_column grid)
 
-let get_box (grid : 'a grid) (box_ind : int) = 
-  for i = 0 to box_ind
-    get_row grid i
+let get_box (grid : 'a grid) (box_ind : int) =
+  let row_ind = box_ind / 3 * 3 and
+  col_ind = box_ind mod 3 * 3 in
+  Array.copy (Array.init 9 (fun x -> grid.(x / 3 + row_ind).(x mod 3 + col_ind)))
 
-let boxes grid = 
-  for i = 0 to 8 do
-    get_box grid i
-  done
+let boxes (grid : 'a grid) : 'a grid =
+  Array.init 9 (get_box grid)
 
 (* Funkcije za ustvarjanje novih mrež *)
 
-let map_grid (f : 'a -> 'b) (grid : 'a grid) : 'b grid = f grid
+let map_grid (f : 'a -> 'b) (grid : 'a grid) : 'b grid = 
+  Array.init 9 (fun i -> Array.map f grid.(i))
 
 let copy_grid (grid : 'a grid) : 'a grid = map_grid (fun x -> x) grid
 
@@ -105,7 +105,8 @@ let grid_of_string cell_of_char str =
 
 type problem = { initial_grid : int option grid }
 
-let print_problem problem : unit = fprint.fprint problem
+let print_problem problem : unit = 
+  print_grid string_of_cell problem.initial_grid
 
 let problem_of_string str =
   let cell_of_char = function
@@ -119,6 +120,6 @@ let problem_of_string str =
 
 type solution = int grid
 
-let print_solution solution = printf.printf solution
+let print_solution solution = print_grid string_of_int solution
 
 let is_valid_solution problem solution = failwith "TODO"
