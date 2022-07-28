@@ -1,4 +1,3 @@
-
 (* Pomožni tip, ki predstavlja mrežo *)
 
 type 'a grid = 'a Array.t Array.t
@@ -44,8 +43,7 @@ let print_grid string_of_cell grid =
 
 (* Funkcije za dostopanje do elementov mreže *)
 
-let get_row (grid : 'a grid) (row_ind : int) = 
-  Array.init 9 (fun col_ind -> grid.(row_ind).(col_ind))
+let get_row (grid : 'a grid) (row_ind : int) = grid.(row_ind)
 
 let rows grid = List.init 9 (get_row grid)
 
@@ -54,26 +52,15 @@ let get_column (grid : 'a grid) (col_ind : int) =
 
 let columns grid = List.init 9 (get_column grid)
 
-let get_box_ind row_ind col_ind =
-  (row_ind / 3) * 3 + (col_ind / 3)
+let get_box (grid : 'a grid) (box_ind : int) = 
+  Array.init 9 (fun stevka -> grid.((box_ind/3)*3 + stevka/3).((box_ind mod 3)*3 + stevka mod 3))
 
-let get_box (grid : 'a grid) (box_ind : int) : 'a grid =
-  let row = (box_ind / 3) * 3
-  and col = (box_ind mod 3) * 3 in
-  let box = Array.init 3 (
-    fun i -> Array.init 3 (
-      fun j -> grid.(row + i).(col + j)
-      )
-    )
-  in
-  box
-
-let boxes grid : 'a grid list = List.init 9 (get_box grid)
+let boxes grid = List.init 9(get_box grid)
 
 (* Funkcije za ustvarjanje novih mrež *)
 
 let map_grid (f : 'a -> 'b) (grid : 'a grid) : 'b grid = 
-  Array.init 9 (fun i -> Array.map f grid.(i))
+  Array.init 9 (fun x -> Array.map f grid.(x))
 
 let copy_grid (grid : 'a grid) : 'a grid = map_grid (fun x -> x) grid
 
@@ -112,12 +99,12 @@ let grid_of_string cell_of_char str =
 
 type problem = { initial_grid : int option grid }
 
-let string_of_cell (cell : int option) = match cell with
-  | None -> " "
-  | Some number -> string_of_int number
-
 let print_problem problem : unit = 
-  print_grid string_of_cell problem.initial_grid
+    let pomozna = function
+        | None -> " "
+        | Some(num) -> string_of_int num
+    in 
+    print_grid pomozna problem.initial_grid
 
 let problem_of_string str =
   let cell_of_char = function
@@ -128,45 +115,51 @@ let problem_of_string str =
   { initial_grid = grid_of_string cell_of_char str }
 
 (* Model za izhodne rešitve *)
-
+ 
 type solution = int grid
 
 let print_solution solution = print_grid string_of_int solution
 
-let rec valid_row (row : int array) : bool = 
-  let len = Array.length row in
-  if len <= 1 
-    then true
-  else
-    let prvi = row.(0)
-    and ostatek = Array.init (len - 1) (fun x -> row.(x + 1)) in
-    if Array.exists (fun x -> x = prvi) ostatek then false 
-    else valid_row ostatek
-
-let valid_box (box : int array array) : bool =
-  valid_row (Array.concat (Array.to_list box))
-
-(* preveri če izpolnjen sudoku ustreza pravilih igre *)
-(* valid_row deluje za vrstice in stolpce enako saj sta istega tipa *)
-let is_valid_grid (grid : solution) : bool = 
-  List.for_all valid_row (rows grid) && 
-  List.for_all valid_row (columns grid) && 
-  List.for_all valid_box (boxes grid)
-
-let compare_cells (c1 : int option) (c2 : int) : bool =
-  match c1 with
-  | None -> true
-  | Some x -> x = c2
-
-let is_applicable_solution (problem : problem) (solution : solution) : bool = 
-  let values = Array.init 9 (
-    fun i -> Array.init 9 (
-      fun j -> compare_cells problem.initial_grid.(i).(j) solution.(i).(j)
-      )
-    )
-  in
-  Array.for_all (fun array -> Array.for_all (fun y -> y = true) array) values
+let intersect sez_1 sez_2 = 
+  List.filter (fun x -> List.mem x sez_1) sez_2
 
 let is_valid_solution (problem : problem) (solution : solution) = 
-  is_applicable_solution problem solution &&
-  is_valid_grid solution
+  (* Lažje delati s seznami, zato pretvorimo *)
+  let problem_list = Array.to_list (Array.map (Array.to_list) problem.initial_grid) in 
+  let solution_list = Array.to_list (Array.map (Array.to_list) solution) in
+
+  (* Preverimo najprej, če solution zadošča pravilnemu gridu(vrstice, stolpci in box-i imajo
+  vse različne števke od 1 do 9) in solution ter problem se usejmata *)
+  let rec match_grids g_p g_s = match (g_p, g_s) with
+      | ([], []) -> true
+      | (_, []) -> false
+      | ([], _) -> false
+      | (x::xs, y::ys) -> (match x with 
+                            | None -> match_grids xs ys
+                            | Some (t) -> (t = y) && match_grids xs ys)
+  in 
+  
+  (*
+  let all_numbers solution =
+  (* Vsak element solution sekamo z [1; 2;...; 9] in če ima rešitev vse različne števke bo to enako matriki
+  iz vrstic [1; 2;...; 9] *)
+    let id = List.init 9 (fun x -> x+1) in
+    let compare = List.map (fun x -> intersect x id) solution in
+    let rec pomozna sez = match sez with 
+      | [] -> true
+      | x::xs -> if x = id then pomozna xs else false in
+    pomozna compare
+  in 
+  *)
+
+  let all_numbers solution = 
+    let id = Array.init 9 (fun x -> x + 1) in 
+    Array.for_all (fun x -> Array.exists (fun y -> y = x) solution) (id) 
+  in
+
+    
+  (List.for_all all_numbers (rows solution)) &&
+  (List.for_all all_numbers (columns solution)) &&
+  (List.for_all all_numbers (boxes solution)) &&
+  (List.for_all2 match_grids (problem_list) (solution_list))
+  

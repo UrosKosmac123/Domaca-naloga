@@ -2,11 +2,9 @@ type available = { loc : int * int; possible : int list }
 
 (* TODO: tip stanja ustrezno popravite, saj boste med reševanjem zaradi učinkovitosti
    želeli imeti še kakšno dodatno informacijo *)
-type state = { 
-  problem : Model.problem; 
-  current_grid : int option Model.grid;
-  empty_cells : available array;
-  }
+type state = { problem : Model.problem; current_grid : int option Model.grid;
+               mutable state_index : int * int;
+               array_of_possibilities : available Array.t Array.t }
 
 let print_state (state : state) : unit =
   Model.print_grid
@@ -15,63 +13,42 @@ let print_state (state : state) : unit =
 
 type response = Solved of Model.solution | Unsolved of state | Fail of state
 
-let filter_integers (array : int option array) : int list =
-  let rec aux acc list = match list with
-    | [] -> acc
-    | x :: xs -> match x with
-      | None -> aux acc xs
-      | Some digit -> aux (digit :: acc) xs
-  in
-  aux [] (Array.to_list array)
+let rec remove_from_list a = function 
+  | [] -> []
+  | x::xs -> if x=a then remove_from_list a xs else x::remove_from_list a xs
 
-let possibilities row_ind col_ind (grid : int option grid) : int list =
-  let row = filter_integers (Model.get_row grid row_ind)
-  and column = filter_integers (Model.get_column grid col_ind) in
-  let box_ind = Model.get_box_ind row_ind col_ind in
-  let unfiltered_box_as_array = 
-    Array.concat (Array.to_list (Model.get_box grid box_ind)) 
-  in
-  let filtered_box_as_list = filter_integers unfiltered_box_as_array in
-  let rec aux acc digit =
-    if digit <= 9 then
-      if (List.for_all (fun x -> x != digit) row 
-      && List.for_all (fun x -> x != digit) column
-      && List.for_all (fun x -> x != digit) filtered_box_as_list)
-        then aux (digit :: acc) (digit + 1)
-      else 
-        aux acc (digit + 1)
-    else
-      acc
-  in
-  aux [] 1
+let intersect sez_1 sez_2 = 
+  List.filter (fun x -> List.mem x sez_1) sez_2
 
-let initialize_empty_cells (grid : int option Model.grid) : available array =
-  let rec cells_aux acc i j : available list =
-    if i <= 8 then 
-      let new_j = if j = 8 then 0 else j + 1 in
-      let new_i = if new_j = 0 then i + 1 else i in
-      let new_acc = 
-        if grid.(i).(j) = None then 
-          { loc = (i,j); possible = (possibilities i j grid) } :: acc 
-        else 
-          acc 
-      in
-      cells_aux new_acc new_i new_j
-    else 
-      acc
-  in
-  Array.of_list (cells_aux [] 0 0)
+let komplement sez univerzalna = 
+  List.filter (fun x -> not (List.mem x sez)) univerzalna   
 
-let initialize_state (problem : Model.problem) : state = { 
-  problem = problem;
-  current_grid = Model.copy_grid problem.initial_grid;
-  empty_cells = initialize_empty_cells problem.initial_grid;
-}
+let from_opt_arr_to_list array = 
+  List.map Option.get (remove_from_list None (Array.to_list array))
+
+(* Zapisali bomo vse možnosti za določeno celico v array arrayov/grid-u *)
+let possible_numbers (problem : Model.problem) arr_of_num = 
+  let row_to_list i = from_opt_arr_to_list (Model.get_row (problem.initial_grid) i) in
+  let column_to_list j = from_opt_arr_to_list (Model.get_column (problem.initial_grid) j) in 
+  let box_to_list i j = from_opt_arr_to_list (Model.get_box(problem.initial_grid) ((i / 3) * 3 + (j / 3))) in 
+  (* Z zadnjim argumentom dobimo box, ki nas zanima glede na lokacijo*)
+  let common i j = intersect (intersect (row_to_list i) (column_to_list j)) box_to_list i j in
+  let id = List.init 9 (fun x -> x + 1) in 
+  for i = 0 to 0 do
+    for j = 0 to 8 do
+      arr_of_num.(i).(j) <-
+      {loc = (i,j); possible = komplement (common i j) id }
+    done
+  done
+
+let initialize_state (problem : Model.problem) : state =
+  let starting_grid = Array.make_matrix 9 9 [] in
+  {problem = Model.copy_grid problem.initial_grid ; current_grid = starting_grid ; state_index = (0,0);
+    array_of_possibilities = possible_numbers problem starting_grid}
 
 let validate_state (state : state) : response =
   let unsolved =
-    Array.exists (Array.exists Option.is_none) state.current_grid
-  in
+    Array.exists (Array.exists Option.is_none) state.current_grid in
   if unsolved then Unsolved state
   else
     (* Option.get ne bo sprožil izjeme, ker so vse vrednosti v mreži oblike Some x *)
@@ -79,138 +56,80 @@ let validate_state (state : state) : response =
     if Model.is_valid_solution state.problem solution then Solved solution
     else Fail state
 
-let update_empty_cells cells used_cell digit = 
-  let rec aux acc = function
-    | [] -> acc
-    | x :: xs -> 
-      let updated_cell = 
-        if x.loc = used_cell.loc then
-          {
-            loc = x.loc; 
-            possible = List.filter (fun i -> i != digit) x.possible;
-          }
-        else 
-          x
-      in
-      aux (updated_cell :: acc) xs
-  in
-  Array.of_list (aux [] (Array.to_list cells))
-
-let updated_grid (grid : 'a Model.grid) loc digit : 'a Model.grid = 
-  let new_grid = Model.copy_grid grid in
-  let (i, j) = loc in
-  new_grid.(i).(j) <- (Some digit);
-  new_grid
-
-(* Vrne celico, ki ima vsaj 2 možnosti in hkrati najmanj od vseh. *)
-let cell_with_least_possibilities state = 
-  if Array.length state.empty_cells = 0 then
-    None
-  else  
-    let rec find_aux cell len cells = match cells with
-      | [] -> cell
-      | x :: xs -> 
-        let new_len = List.length x.possible in
-        if new_len < len then 
-          find_aux x new_len xs
-        else
-          find_aux cell len xs
-    in
-    let arb_cell = state.empty_cells.(0) in
-    let arb_len = List.length arb_cell.possible in
-    let cell = 
-      find_aux arb_cell arb_len (Array.to_list state.empty_cells) 
-    in
-    if List.length cell.possible < 2 then
-      None
-    else
-      Some cell
-
-let rec different_digits = 
-  function
-  | [] -> true
-  | x::xs ->
-    if List.exists (fun i -> i = x) xs then
-      false
-    else
-      different_digits xs
-
-let check_grid (grid : int option Model.grid) : bool =
-  let rec valid_rows = function
-    | [] -> true
-    | row :: xs ->
-      if different_digits (filter_integers row) then
-        valid_rows xs
-      else
-        false
-  in
-  let rec boxes_aux acc = function
-    | [] -> acc
-    | box :: xs ->
-      boxes_aux ((Array.concat (Array.to_list box)) :: acc) xs
-  in
-  let boolean = (
-    valid_rows (Model.rows grid) && 
-    valid_rows (Model.columns grid) &&
-    valid_rows (boxes_aux [] (Model.boxes grid))
-  )
-  in
-  boolean
-
 let branch_state (state : state) : (state * state) option =
   (* TODO: Pripravite funkcijo, ki v trenutnem stanju poišče hipotezo, glede katere
      se je treba odločiti. Če ta obstaja, stanje razveji na dve stanji:
      v prvem predpostavi, da hipoteza velja, v drugem pa ravno obratno.
      Če bo vaš algoritem najprej poizkusil prvo možnost, vam morda pri drugi
      za začetek ni treba zapravljati preveč časa, saj ne bo nujno prišla v poštev. *)
-  
-  if check_grid state.current_grid then
-    let empty_cell = cell_with_least_possibilities state in
-    match empty_cell with
-    | None -> None 
-    | Some cell -> 
-      let digit = List.hd cell.possible in
-      let new_grid = updated_grid state.current_grid cell.loc digit in
-      let s1 = {
-        problem = state.problem;
-        current_grid = new_grid;
-        empty_cells = initialize_empty_cells new_grid;
-      }
-      and s2 = {
-        problem = state.problem;
-        current_grid = state.current_grid;
-        empty_cells = update_empty_cells state.empty_cells cell digit;
-      }
-      in
-      Some (s1, s2)
-  else
-    None
 
-let clean_state state : state = 
-  let rec aux acc (cells : available list) : available list = 
-    match cells with
-    | [] -> acc
-    | x :: xs -> 
-      match x.possible with
-      | [] -> aux acc xs
-      | digit :: [] -> 
-        let (i, j) = x.loc in
-        state.current_grid.(i).(j) <- (Some digit);
-        aux acc xs
-      | d1 :: d2 :: _ -> aux (x :: acc) xs
-  in
-  {
-    problem = state.problem;
-    current_grid = state.current_grid;
-    empty_cells = Array.of_list (aux [] (Array.to_list state.empty_cells))
-  }
+  (* Ideja: za element x bomo ločili dve možnosti, ali je  x rešitev(state_1) ali pa ni(state_2).
+            Tako bomo dobili dva state-a. V state_1 vstavimo x in ga os  *)
+
+    let remove_from_row (state : state) i x =  
+      for j = 0 to 8 do
+        state.array_of_possibilities.(i).(j) 
+        <- {loc=(i,j); possible = remove_from_list x state.array_of_possibilities.(i).(j).possible}
+      done
+    in
+
+    let remove_from_column (state : state) j x =  
+      for i = 0 to 8 do
+        state.array_of_possibilities.(i).(j) 
+        <- {loc=(i,j); possible = remove_from_list x state.array_of_possibilities.(i).(j).possible}
+      done
+    in
+
+    let remove_from_box (state : state) i j x = 
+      let box_i i j = ((i / 3) * 3 + (j / 3)) in 
+      let box_i_mod = (box_i i j) mod 3 in 
+      for i = (box_i i j) to (box_i i j) + 2 do
+        for j = (box_im - 1) to (box_im + 1) do
+          state.array_of_possibilities.(i).(j) <- 
+          {loc=(i,j); possible = remove_from_list x state.array_of_possibilities.(i).(j).possible}
+        done 
+      done
+    in
+    
+    let next_index (i, j) = 
+      if j < 8 then (i, j + 1) else (i + 1, 0) in 
+
+    (* Začnemo v (i, j), kjer se pojavi prvi None tj. ne zapolnjeno mesto *)
+    let (i, j) = 
+      let state_index = state.state_index in 
+      let rec find_None grid (i, j) = match grid.(i).(j) with
+        | None -> (i, j)
+        | Some(x) -> find_None grid (next_index (i, j))
+    in
+      find_None state.current_grid state_index in 
+  
+    match state.array_of_possibilities.(i).(j).possible with
+      | [] -> None
+      | x::xs -> 
+      let state_1 = {problem = state.problem; current_grid = Model.copy_grid state.current_grid; 
+                    state_index = state.state_index, array_of_possibilities = state.array_of_possibilities} in
+      let state_2 = {problem = state.problem; current_grid = Model.copy_grid state.current_grid; 
+                  state_index = state.state_index, array_of_possibilities = state.array_of_possibilities} in
+    
+      (* Vstavimo element x v grid *)
+      state_1.current_grid.(i).(j) <- Some(x) ;
+      (* Posodobimo seznam možnosti, če je x v grid-u *)
+      state_1.array_of_possibilities.(i).(j) <- {loc = (i,j); possible = []} ;
+      (* S tem odstranimo element x iz seznama moznih stevilk v box, row in column *)
+      state_1.array_of_possibilities.(i) <- remove_from_row state i x ;
+      state_1.array_of_possibilities <- remove_from_row state j x ;
+      state_1.array_of_possibilities <- remove_from_box state i j x ;
+      (* Postopek nadaljujemo z naslednjim indekom *) 
+      state_1.state_index <- (next_index state_1.state_index) ;
+      state_2.array_of_possibilities.(i).(j) <- {loc = (i,j); possible = xs} ;
+      Some(state_1, state_2)
+
 
 (* pogledamo, če trenutno stanje vodi do rešitve *)
 let rec solve_state (state : state) =
   (* uveljavimo trenutne omejitve in pogledamo, kam smo prišli *)
   (* TODO: na tej točki je stanje smiselno počistiti in zožiti možne rešitve *)
-  let cleaned_state = clean_state state in
-  match validate_state cleaned_state with
+  match validate_state state with
   | Solved solution ->
       (* če smo našli rešitev, končamo *)
       Some solution
@@ -218,7 +137,7 @@ let rec solve_state (state : state) =
       (* prav tako končamo, če smo odkrili, da rešitev ni *)
       None
   | Unsolved state' ->
-      (* če še nismo končali, nadaljujemo s tem stanjem, v katerem smo končali *)
+      (* če še nismo končali, raziščemo stanje, v katerem smo končali *)
       explore_state state'
 
 and explore_state (state : state) =
@@ -227,7 +146,7 @@ and explore_state (state : state) =
   | None ->
       (* če stanja ne moremo razvejiti, ga ne moremo raziskati *)
       None
-  | Some (st1, st2) -> 
+  | Some (st1, st2) -> (
       (* če stanje lahko razvejimo na dve možnosti, poizkusimo prvo *)
       match solve_state st1 with
       | Some solution ->
@@ -235,7 +154,7 @@ and explore_state (state : state) =
           Some solution
       | None ->
           (* če prva možnost ne vodi do rešitve, raziščemo še drugo možnost *)
-          solve_state st2
+          solve_state st2 )
 
 let solve_problem (problem : Model.problem) =
   problem |> initialize_state |> solve_state
