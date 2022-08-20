@@ -130,27 +130,23 @@ let is_valid_solution (problem : problem) (solution : solution) =
 
   (* Preverimo najprej, če solution zadošča pravilnemu gridu(vrstice, stolpci in box-i imajo
   vse različne števke od 1 do 9) in solution ter problem se usejmata *)
+  let rec match_rows row_p row_s = match (row_p, row_s) with
+    | ([], []) -> true
+    | ([], _) -> false
+    | (_, []) -> false
+    | (x::xs, y::ys) -> (match x with 
+        | None -> match_rows xs ys
+        | Some (t) -> (t = y) && match_rows xs ys)
+  in 
+           
+
   let rec match_grids g_p g_s = match (g_p, g_s) with
-      | ([], []) -> true
-      | (_, []) -> false
-      | ([], _) -> false
-      | (x::xs, y::ys) -> (match x with 
-                            | None -> match_grids xs ys
-                            | Some (t) -> (t = y) && match_grids xs ys)
-  in 
-  
-  (*
-  let all_numbers solution =
-  (* Vsak element solution sekamo z [1; 2;...; 9] in če ima rešitev vse različne števke bo to enako matriki
-  iz vrstic [1; 2;...; 9] *)
-    let id = List.init 9 (fun x -> x+1) in
-    let compare = List.map (fun x -> intersect x id) solution in
-    let rec pomozna sez = match sez with 
-      | [] -> true
-      | x::xs -> if x = id then pomozna xs else false in
-    pomozna compare
-  in 
-  *)
+    | ([], []) -> true
+    | (_, []) -> false
+    | ([], _) -> false
+    | (x::xs, y::ys) -> match_rows x y && match_grids xs ys
+  in
+
 
   let all_numbers solution = 
     let id = Array.init 9 (fun x -> x + 1) in 
@@ -161,5 +157,5 @@ let is_valid_solution (problem : problem) (solution : solution) =
   (List.for_all all_numbers (rows solution)) &&
   (List.for_all all_numbers (columns solution)) &&
   (List.for_all all_numbers (boxes solution)) &&
-  (List.for_all2 match_grids (problem_list) (solution_list))
-  
+  (match_grids (problem_list) (solution_list))
+
